@@ -1,51 +1,38 @@
 ﻿extern crate lz4;
 
-use std::io::{Write, Read};
+use std::io::{Write, Read, Error, ErrorKind};
 use std::fs::File;
 use lz4::encoder::Encoder;
 
-fn read_cache(path: &Path, paths: &Vec<PathBuf>) -> Result<OutputInfo, Error> {
-	let mut file = try! (OpenOptions::new().read(true).write(true).open(Path::new(path)));
-	try! (file.write(&[4]));
-	try! (file.seek(SeekFrom::Start(0)));
-	let mut stream = try! (lz4::Decoder::new (file));
-
-
-	if try! (read_exact(&mut stream, HEADER.len())) != HEADER {
-		return Err(Error::new(ErrorKind::InvalidInput, CacheError::InvalidHeader(path.to_path_buf())));
-	}
-	if try! (read_usize(&mut stream)) != paths.len() {
-		return Err(Error::new(ErrorKind::InvalidInput, CacheError::PackedFilesMismatch(path.to_path_buf())));
-	} 
-	for path in paths.iter() {
-		let mut file = try! (File::create(path));
-		loop {
-			let size = try! (read_usize(&mut stream));
-			if size == 0 {break;}
-			let block = try! (read_exact(&mut stream, size));
-			try! (file.write_all(&block));
+fn read_usize(stream: &mut Read) -> Result<usize, Error> {
+	let mut result: usize = 0;
+	let mut buffer = [0 as u8; 8];
+	match try! (stream.read(&mut buffer)) {
+		0 => Ok(0),
+		v if v == buffer.len() => {
+			for i in 0..buffer.len() {
+		 		result += (buffer[i] as usize) << (i * 8);
+			}
+			Ok(result)
 		}
+		_ => Err(Error::new(ErrorKind::Other, "Unexpected end of stream")),
 	}
-	let output = try! (read_output(&mut stream));
-	if try! (read_exact(&mut stream, FOOTER.len())) != FOOTER {
-		return Err(Error::new(ErrorKind::InvalidInput, CacheError::InvalidFooter(path.to_path_buf())));
-	}
-	Ok(output)
 }
 
 #[test]
 fn test_compression() {
 	let mut encoder = Encoder::new(Vec::new(), 1).unwrap();
 	let mut buffer: [u8; 64 * 1024] = [0; 64 * 1024];
-	let mut source = File::open("tests/0595f71fd47dfc.raw").unwrap();
-	encoder.write(&HEADER).unwrap();
-	encoder.write(&[0x00, 0x00, 0x00, 0x01]).unwrap();
+	let mut source = File::open("tests/a0a2bad4090baa.blk").unwrap();
 	loop {
-		encoder.write(&[0x00, 0x01, 0x00, 0x00]).unwrap();
-		match source.read(&mut buffer).unwrap() {
-			0 => {break;}
-			s => {encoder.write(&buffer[0..s]).unwrap();}
+		let len = read_usize(&mut source).unwrap();
+		if len == 0 {
+			break;
 		}
+		if source.read(&mut buffer[0..len]).unwrap() != len {
+			panic! ("Unexpected end of stream");
+		}
+		encoder.write(&buffer[0..len]).unwrap();
 	}
 	let (_, result) = encoder.finish();
 	result.unwrap();
