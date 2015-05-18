@@ -120,7 +120,7 @@ extern {
 	 */
 	// LZ4F_errorCode_t LZ4F_createCompressionContext(LZ4F_compressionContext_t* LZ4F_compressionContextPtr, unsigned version);
 	pub fn LZ4F_createCompressionContext(ctx: &mut LZ4FCompressionContext, version: c_uint) -> LZ4FErrorCode;
-
+	
 	// LZ4F_errorCode_t LZ4F_freeCompressionContext(LZ4F_compressionContext_t LZ4F_compressionContext);
 	pub fn LZ4F_freeCompressionContext(ctx: LZ4FCompressionContext) -> LZ4FErrorCode;
 
@@ -141,6 +141,9 @@ extern {
 	 */
 	// size_t LZ4F_compressBound(size_t srcSize, const LZ4F_preferences_t* preferencesPtr);
 	pub fn LZ4F_compressBound(srcSize: size_t, preferencesPtr: *const LZ4FPreferences) -> LZ4FErrorCode;
+
+	// size_t LZ4F_compressFrameBound(size_t srcSize, const LZ4F_preferences_t* preferencesPtr);
+	pub fn LZ4F_compressFrameBound(srcSize: size_t, preferencesPtr: *const LZ4FPreferences) -> LZ4FErrorCode;
 
 	/* LZ4F_compressUpdate()
 	 * LZ4F_compressUpdate() can be called repetitively to compress as much data as necessary.

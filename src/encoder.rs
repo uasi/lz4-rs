@@ -25,7 +25,7 @@ impl<W: Write> Encoder<W> {
 		{
 			frame_info: LZ4FFrameInfo
 			{
-				block_size_id: BlockSizeId::Default,
+				block_size_id: BlockSizeId::Max64KB,
 				block_mode: BlockMode::Linked,
 				content_checksum_flag: ContentChecksum::ContentChecksumEnabled,
 				reserved: [0; 5],
@@ -39,6 +39,7 @@ impl<W: Write> Encoder<W> {
 			c: try! (EncoderContext::new()),
 			buf: Vec::with_capacity(try! (check_error(unsafe {LZ4F_compressBound(BUFFER_SIZE as size_t, &preferences)})))
 		};
+println!("B: {}", encoder.buf.capacity());
 		try! (encoder.write_header(&preferences));
 		Ok (encoder)
 	}
@@ -51,8 +52,17 @@ impl<W: Write> Encoder<W> {
 		}
 		self.w.write_all(&self.buf)
 	}
-
+	
 	fn write_end(&mut self) -> Result<()> {
+//println!("flush: {}", self.buf.capacity());
+		unsafe {
+			let len = try! (check_error(LZ4F_flush(self.c.c, self.buf.as_mut_ptr(), self.buf.capacity() as size_t, ptr::null())));
+			self.buf.set_len(len);
+		};
+		if self.buf.len() != 0 {
+			try! (self.w.write_all(&self.buf));
+		}
+//println!("finish: {}", self.buf.capacity());
 		unsafe {
 			let len = try! (check_error(LZ4F_compressEnd(self.c.c, self.buf.as_mut_ptr(), self.buf.capacity() as size_t, ptr::null())));
 			self.buf.set_len(len);
@@ -76,6 +86,7 @@ impl<W: Write> Write for Encoder<W> {
 		{
 			let size = cmp::min(buf.len() - offset, BUFFER_SIZE);
 			unsafe {
+println!("write: {}", size);
 				let len = try! (check_error(LZ4F_compressUpdate(self.c.c, self.buf.as_mut_ptr(), self.buf.capacity() as size_t, buf[offset..].as_ptr(), size as size_t, ptr::null())));
 				self.buf.set_len(len);
 				try! (self.w.write_all(&self.buf));
@@ -127,8 +138,9 @@ impl Drop for EncoderContext {
 
 #[cfg(test)]
 mod test {
-	use std::io::Write;
+	use std::io::{Read, Write};
 	use super::Encoder;
+use std::fs::File;
 
 	#[test]
 	fn test_encoder_smoke() {
@@ -145,11 +157,33 @@ mod test {
 		let mut buffer = Vec::new();
 		let mut rnd: u32 = 42;
 		for _ in 0..1024 * 1024 {
-			buffer.push((rnd & 0xFF) as u8);
+			buffer.push(((rnd >> 10) & 0xFF) as u8);
 			rnd = ((1664525 as u64) * (rnd as u64) + (1013904223 as u64)) as u32;
 		}
 		encoder.write(&buffer).unwrap();
 		let (_, result) = encoder.finish();
 		result.unwrap();
+	}
+
+	#[test]
+	fn test_encoder_flush() {
+		let mut buffer = Vec::new();
+		File::open("tests/random.bin").unwrap().read_to_end(&mut buffer).unwrap();
+
+		let BUFFER_SIZE: usize = 32 * 1024 * 4;
+		let MIN_SIZE = BUFFER_SIZE - 1000;
+		let MAX_SIZE = BUFFER_SIZE + 1000;
+		for test_size in MIN_SIZE..MAX_SIZE {
+			let mut encoder = Encoder::new(Vec::new(), 1).unwrap();
+			encoder.write(&buffer[0..test_size]).unwrap();
+			let (_, result) = encoder.finish();
+			match result {
+				Ok(_) => {}
+				Err(e) => {
+					println!("{}", test_size);
+					panic!("{:?}", e);
+				}
+			}
+		}
 	}
 }
